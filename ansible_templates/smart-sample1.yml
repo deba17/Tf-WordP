@@ -1,0 +1,146 @@
+---
+- hosts: "{{ passed_in_hosts }}"
+  become: yes
+  remote_user: ubuntu
+  become_user: root
+  vars_files:
+    - vars/default.yml
+
+  tasks:
+    - name: install prerequisites
+      apt: name=aptitude update_cache=yes state=latest force_apt_get=yes
+      tags: [ system ]
+
+    - name: install unzip
+      apt: name=unzip update_cache=yes state=latest force_apt_get=yes
+      tags: [ system ]
+
+    - name: Install LAMP Packages
+      apt: name={{ item }} update_cache=yes state=latest
+      loop: [ 'apache2', 'mysql-server', 'python3-pymysql', 'php', 'php-mysql', 'libapache2-mod-php' ]
+      tags: [ system ]
+
+    - name: Install PHP Extensions
+      apt: name={{ item }} update_cache=yes state=latest
+      loop: "{{ php_modules }}"
+      tags: [ system ]
+
+#Apache Configuration
+    - name: Create document root
+      file:
+        path: "/var/www/"
+        state: directory
+        owner: "www-data"
+        group: "www-data"
+        mode: '0755'
+      tags: [ apache ]
+
+#MySQL Configuration
+    - name: Set the root password
+      mysql_user:
+        name: root
+        password: "{{ mysql_root_password }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+      tags: [ mysql, mysql-root ]
+
+    - name: Remove all anonymous user accounts
+      mysql_user:
+        name: ''
+        host_all: yes
+        state: absent
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+      tags: [ mysql ]
+
+    - name: Remove the MySQL test database
+      mysql_db:
+        name: test
+        state: absent
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+      tags: [ mysql ]
+
+    - name: Create database for Wordpress
+      mysql_db:
+        name: "{{ mysql_db }}"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+      tags: [ mysql ]
+
+    - name: Create MySQL user for WordPress
+      mysql_user:
+        name: "{{ mysql_user }}"
+        password: "{{ mysql_password }}"
+        priv: "{{ mysql_db }}.*:ALL"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+      tags: [ mysql ]
+
+#UFW Configuration
+    - name: "UFW - Allow HTTP on port {{ http_port}}"
+      ufw:
+        rule: allow
+        port: "{{ http_port }}"
+        proto: tcp
+      tags: [ system ]
+
+#WordPress Configuration
+    
+    - name: Create Directoru
+      file:
+        path: "/var/www/html/{{ http_host }}"
+        state: directory
+        recurse: yes
+        owner: www-data
+        group: www-data
+        mode: '0755'
+      tags: [ wordpress ]
+         
+    - name: Download wordpress
+      unarchive:
+        src: https://en-gb.wordpress.org/latest-en_GB.zip
+        dest: "/var/www/html/{{ http_host }}"
+        remote_src: yes
+        creates: "/var/www/html/{{ http_host }}/wordpress"
+      tags: [ wordpress ]
+
+    - name: Copy the files
+      copy:
+        src: "/var/www/html/{{ http_host }}/wordpress/"
+        dest: "/var/www/html/"
+        remote_src: yes
+        owner: www-data
+        group: www-data
+        mode: '0755'
+      tags: [ wordpress ]
+
+    - name: Remove the default index.html
+      file:
+        path: "/var/www/html/index.html"
+        state: absent
+      tags: [ wordpress ]
+
+    - name: Set Ownership
+      file:
+        path: "/var/www/"
+        state: directory
+        recurse: yes
+        owner: www-data
+        group: www-data
+      tags: [ wordpress ]
+
+  handlers:
+    - name: Reload Apache
+      service:
+        name: apache2
+        state: reloaded
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+
+
+
